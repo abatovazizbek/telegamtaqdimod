@@ -1,37 +1,44 @@
 import os
 import asyncio
-from aiogram import Bot, Dispatcher, F, types
 import google.generativeai as genai
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.filters import Command
 
-# Railway-da yozilgan nomlarni avtomatik qidirish
-# Siz kod ichiga hech narsa yozishingiz shart emas!
-TOKEN = os.environ.get("8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY") or os.environ.get("8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY")
-API_KEY = os.environ.get("AIzaSyDMFlvMD-VMDkOeNitUzBjSzNy1a3L2Xj0") or os.environ.get("AIzaSyDMFlvMD-VMDkOeNitUzBjSzNy1a3L2Xj0")
+# 1. Railway Variables - SKRINSHOTDAGI NOM BILAN BIR XIL QILINDI
+# Railway'da nima deb yozgan bo'lsangiz, shu yerga o'shani yozish shart!
+TOKEN_VAL = os.environ.get("8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY")
+GEMINI_VAL = os.environ.get("AIzaSyDMFlvMD-VMDkOeNitUzBjSzNy1a3L2Xj0")
 
-# Bot va AI-ni sozlash
-bot = Bot(token=TOKEN) if TOKEN else None
-dp = Dispatcher()
-
-if API_KEY:
-    genai.configure(api_key=API_KEY)
+# Gemini AI-ni sozlash
+if GEMINI_VAL:
+    genai.configure(api_key=GEMINI_VAL)
     model = genai.GenerativeModel('gemini-1.5-flash')
 
-@dp.message(F.text == "/start")
-async def start(message: types.Message):
-    await message.answer("Salom! Bot tayyor. Mavzu yozing.")
+# Botni yoqish
+bot = Bot(token=TOKEN_VAL)
+dp = Dispatcher()
 
+# /start komandasi
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    await message.answer("Salom! Bot ishga tushdi. ✅\n\nMavzu yozing, taqdimot matnini tayyorlayman.")
+
+# Xabarlarni qabul qilish
 @dp.message(F.text)
-async def chat(message: types.Message):
+async def handle_message(message: types.Message):
+    if not GEMINI_VAL:
+        await message.answer("Xato: GEMINI_KEY topilmadi.")
+        return
+
     try:
-        # AI-dan javob olish
         response = model.generate_content(message.text)
         await message.answer(response.text)
-    except Exception:
-        await message.answer("Tizimda ulanish xatosi (API kalitni tekshiring).")
+    except Exception as e:
+        await message.answer(f"Xatolik: {str(e)[:50]}")
 
 async def main():
-    if bot:
-        await dp.start_polling(bot)
+    # Bot pollingni boshlaydi
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
