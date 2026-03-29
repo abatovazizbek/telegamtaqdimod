@@ -2,33 +2,36 @@ import asyncio
 import google.generativeai as genai
 from aiogram import Bot, Dispatcher, F, types
 
-# --- 1. MA'LUMOTLARNI TO'G'RIDAN-TO'G'RI YOZISH ---
-# Railway-dagi o'zgaruvchilar endi shart emas
+# Ma'lumotlaringiz
 TOKEN = "8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY"
 API_KEY = "AIzaSyDMFlvMD-VMDkOeNitUzBjSzNy1a3L2Xj0"
 
-# --- 2. SOZLAMALAR ---
+# Gemini sozlash
 genai.configure(api_key=API_KEY)
+
+# MODEL NOMINI TO'G'RI YOZISH
+# Agar gemini-1.5-flash ishlamasa, 'gemini-pro' deb yozib ko'ring
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- 3. BOT FUNKSIYALARI ---
 @dp.message(F.text == "/start")
 async def welcome(message: types.Message):
-    await message.answer("Bot to'g'ridan-to'g'ri ulanish orqali ishga tushdi! ✅")
+    await message.answer("Bot ulandi! Savolingizni bering.")
 
 @dp.message(F.text)
 async def ai_answer(message: types.Message):
     try:
+        # AI javobini olish
         response = model.generate_content(message.text)
         await message.answer(response.text)
     except Exception as e:
-        await message.answer(f"Xatolik yuz berdi: {str(e)[:50]}")
+        # Xatolikni to'liq ko'rish uchun logga chiqaramiz
+        print(f"Xato: {e}")
+        await message.answer("Kechirasiz, hozir javob bera olmayman. Model ulanishida xatolik.")
 
 async def main():
-    print("Bot pollingni boshladi...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
