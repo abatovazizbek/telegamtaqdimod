@@ -1,3 +1,4 @@
+import os
 import asyncio
 import google.generativeai as genai
 from aiogram import Bot, Dispatcher, F, types
