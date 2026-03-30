@@ -11,7 +11,7 @@ genai.configure(api_key=API_KEY)
 
 # MODEL NOMINI TO'G'RI YOZISH
 # Agar gemini-1.5-flash ishlamasa, 'gemini-pro' deb yozib ko'ring
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-pro')
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
