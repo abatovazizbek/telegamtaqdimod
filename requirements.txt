@@ -1,3 +1,5 @@
 aiogram==3.4.1
-google-generativeai>=0.7.2
+google-generativeai>=0.8.3
 python-pptx
+requests
+pydantic<2.6.0
