@@ -18,8 +18,7 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# 2. MODELNI TO'G'RI SOZLASH (404 XATOSI UCHUN)
-# Loglardagi '404 models/gemini-1.5-flash is not found' xatosini oldini oladi
+# Modelni sozlash
 def get_working_model():
     if not GEMINI_API_KEY:
         logging.error("GEMINI_KEY topilmadi!")
@@ -38,32 +37,32 @@ def get_working_model():
 
 model = get_working_model()
 
-# 3. TAQDIMOT YARATISH (YULDUZCHALAR VA KIRISH SO'ZLARISIZ)
-# Slaydlardagi yulduzcha (*) va (**) belgilarini tozalaydi
+# 2. TAQDIMOT YARATISH (SAHIFALASHNI KUCHAYTIRILGAN VARIANTI)
 def create_pptx(text_content):
     prs = Presentation()
-    slides_data = text_content.split("###")
     
-    for content in slides_data:
+    # Sahifalarga ajratish: ### yoki Slayd 1:, Slayd 2: kabi belgilardan foydalanamiz
+    # Bu qism matnni qismlarga bo'lishni kafolatlaydi
+    raw_slides = re.split(r'###|Slayd\s*\d+:|Slayd\s*\d+\.', text_content)
+    
+    for content in raw_slides:
         content = content.strip()
-        # "Mana siz so'ragan reja" kabi kirish gaplarini slaydlarga qo'shmaydi
-        if not content or len(content) < 15 or any(x in content.lower()[:40] for x in ["so'ragan", "reja", "assalom"]):
+        # Agar matn juda qisqa bo'lsa yoki kirish gap bo'lsa tashlab ketamiz
+        if not content or len(content) < 20 or "so'ragan" in content.lower():
             continue
             
         slide = prs.slides.add_slide(prs.slide_layouts[1])
         lines = content.split('\n')
         
-        # Sarlavhani tozalash
-        title_text = lines[0].replace("Slayd:", "").replace("**", "").replace("*", "").strip()
-        slide.shapes.title.text = title_text
-        slide.shapes.title.text_frame.paragraphs[0].font.color.rgb = RGBColor(0, 51, 102)
-
+        # Sarlavhani tozalash va o'rnatish
+        title_text = lines[0].replace("**", "").replace("*", "").strip()
+        slide.shapes.title.text = title_text[:100] # Juda uzun bo'lib ketmasligi uchun
+        
         tf = slide.placeholders[1].text_frame
         tf.word_wrap = True
         
         first_line = True
         for line in lines[1:]:
-            # Matn ichidagi barcha yulduzchalarni o'chiradi
             clean_line = line.strip().replace("**", "").replace("* ", "").replace("*", "").replace("- ", "")
             if not clean_line or clean_line == "---": continue
             
@@ -71,41 +70,32 @@ def create_pptx(text_content):
             first_line = False
             p.text = clean_line
             p.font.size = Pt(18)
-            p.font.color.rgb = RGBColor(0, 0, 0)
-            
+    
     buffer = io.BytesIO()
     prs.save(buffer)
     buffer.seek(0)
     return buffer
 
-# 4. MATNNI TAHLIL QILISH (SLAYDLAR SONIGA MOSLASHISH)
-# Foydalanuvchi yozgan sondan miqdorni, matndan esa mavzuni ajratadi
+# 3. HANDLER
 @dp.message(F.text)
 async def handle_ppt_request(message: types.Message):
-    if not model:
-        await message.answer("AI ulanishida xatolik yuz berdi! ❌")
-        return
-
-    # Matn ichidan sonni topish
+    # Sonni va mavzuni ajratish
     match = re.search(r'(\d+)', message.text)
-    if match:
-        slide_count = int(match.group(1))
-        # Mavzudan sonni olib tashlaydi, shunda u sarlavhaga qo'shilmaydi
-        clean_topic = re.sub(r'\d+\s*(ta|varaq|bet|slayd|slayid|sahifa)?', '', message.text, flags=re.IGNORECASE).strip()
-    else:
-        slide_count = 10
-        clean_topic = message.text.strip()
-
+    slide_count = int(match.group(1)) if match else 10
+    clean_topic = re.sub(r'\d+\s*(ta|varaq|bet|slayd|slayid|sahifa)?', '', message.text, flags=re.IGNORECASE).strip()
+    
     if not clean_topic: clean_topic = "Taqdimot"
     if slide_count > 25: slide_count = 25
 
-    wait_msg = await message.answer(f"🔍 '{clean_topic}' mavzusida {slide_count} ta slayd tayyorlanmoqda... ⏳")
+    wait_msg = await message.answer(f"⏳ '{clean_topic}' mavzusida {slide_count} ta sahifali taqdimot tayyorlanmoqda...")
     
     try:
+        # AI-ga sahifalash haqida juda qat'iy buyruq beramiz
         prompt = (
-            f"Mavzu: {clean_topic}. Ushbu mavzuda aynan {slide_count} ta slayddan iborat o'zbekcha taqdimot rejasi tuzing. "
-            f"DIQQAT: Javobni darhol '###' belgisi bilan boshlang. Hech qanday kirish so'zlari yozmang! "
-            f"Slaydlar ichida yulduzcha (* yoki **) ishlatmang."
+            f"Mavzu: {clean_topic}. Ushbu mavzuda aynan {slide_count} ta alohida slayddan iborat taqdimot rejasi yozing. "
+            f"HAR BIR yangi slaydni '###' belgisi bilan boshlang. Bu juda muhim! "
+            f"Hech qanday kirish so'zlari yozmang. Faqat slaydlar mazmuni bo'lsin. "
+            f"Har bir slayd sarlavhasi qisqa bo'lsin."
         )
         
         response = model.generate_content(prompt)
@@ -114,16 +104,14 @@ async def handle_ppt_request(message: types.Message):
         filename = f"{clean_topic.replace(' ', '_')}.pptx"
         document = types.BufferedInputFile(pptx_file.read(), filename=filename)
         
-        await message.answer_document(document, caption=f"✅ '{clean_topic}' bo'yicha {slide_count} ta slayd tayyor!")
+        await message.answer_document(document, caption=f"✅ {slide_count} ta sahifaga ajratilgan taqdimot tayyor!")
         await wait_msg.delete()
         
     except Exception as e:
-        logging.error(f"Xatolik: {e}")
-        await message.answer("Xatolik yuz berdi, qayta urinib ko'ring.")
+        logging.error(f"Xato: {e}")
+        await message.answer("Xatolik yuz berdi. Qayta urinib ko'ring.")
 
-# 5. ISHGA TUSHIRISH (CONFLICT XATOSI UCHUN)
 async def main():
-    # 'TelegramConflictError' xatosini oldini oladi
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
