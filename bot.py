@@ -6,29 +6,33 @@ import google.generativeai as genai
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from pptx import Presentation
-from pptx.util import Inches, Pt
+from pptx.util import Pt
 
 # 1. SOZLAMALAR
 TOKEN = "8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY"
 GEMINI_API_KEY = os.getenv("GEMINI_KEY")
 
 logging.basicConfig(level=logging.INFO)
-genai.configure(api_key=GEMINI_API_KEY)
 
-# Modelni tanlash
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Gemini API ni sozlash
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    # Eng barqaror model nomidan foydalanamiz
+    model = genai.GenerativeModel('gemini-1.5-flash')
+else:
+    model = None
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# 2. TAQDIMOT YARATISH FUNKSIYASI
+# 2. TAQDIMOT YARATISH FUNKSIYASI (SAHIFALARGA BO'LISH BILAN)
 def create_pptx(text_content, topic):
     prs = Presentation()
     
     # Matnni '###' belgisi orqali slayd bo'laklariga bo'lamiz
-    slides_content = text_content.split("###")
+    slides_data = text_content.split("###")
     
-    for content in slides_content:
+    for content in slides_data:
         content = content.strip()
         if not content or len(content) < 10:
             continue
@@ -42,9 +46,15 @@ def create_pptx(text_content, topic):
         title_text = lines[0].replace("Slayd:", "").replace("Slayd", "").strip()
         body_text = "\n".join(lines[1:]).strip()
         
-        # Slaydga matnlarni joylashtirish
+        # Slaydga yozish
         slide.shapes.title.text = title_text
-        slide.placeholders[1].text = body_text
+        
+        body_shape = slide.placeholders[1]
+        body_shape.text = body_text
+        
+        # Shrift o'lchamini biroz kattalashtiramiz
+        for paragraph in body_shape.text_frame.paragraphs:
+            paragraph.font.size = Pt(18)
             
     buffer = io.BytesIO()
     prs.save(buffer)
@@ -53,51 +63,46 @@ def create_pptx(text_content, topic):
 
 # 3. BOT KOMANDALARI
 @dp.message(Command("start"))
-async def start(message: types.Message):
-    user_name = message.from_user.first_name
+async def start_handler(message: types.Message):
     await message.answer(
-        f"Assalomu alaykum, {user_name}!\n\n"
-        "Men sizga istalgan mavzuda **o'zbekcha taqdimot** tayyorlab beraman.\n"
-        "Mavzuni yuboring:"
+        f"Assalomu alaykum, {message.from_user.first_name}!\n\n"
+        "Menga mavzu yuboring, men sizga o'zbek tilida, sahifalangan taqdimot tayyorlab beraman. 📊"
     )
 
 @dp.message(F.text)
-async def handle_ppt(message: types.Message):
-    if not GEMINI_API_KEY:
-        await message.answer("Xato: Railway Variables'da GEMINI_KEY topilmadi.")
+async def handle_ppt_request(message: types.Message):
+    if not model:
+        await message.answer("Xato: GEMINI_KEY o'rnatilmagan yoki noto'g'ri. ❌")
         return
 
-    wait_msg = await message.answer(f"🔍 '{message.text}' mavzusida ma'lumot yig'ilmoqda va taqdimot yaratilmoqda. Iltimos, kuting... ⏳")
+    wait_msg = await message.answer(f"🔍 '{message.text}' mavzusida taqdimot tayyorlanmoqda... ⏳")
     
     try:
-        # Gemini uchun mukammal o'zbekcha prompt
+        # Gemini uchun o'zbekcha buyruq
         prompt = (
-            f"Mavzu: {message.text}. Ushbu mavzuda 5-6 slayddan iborat mukammal o'zbekcha taqdimot rejasi tuzing. "
-            f"Har bir yangi slaydni '###' belgisi bilan boshlang. "
-            f"Faqat o'zbek tilida yozing. Har bir slayd sarlavhasi qisqa va mazmunli bo'lsin."
+            f"Mavzu: {message.text}. Ushbu mavzuda 5-6 ta slayddan iborat o'zbekcha taqdimot rejasi tuzing. "
+            f"Juda muhim: Har bir slaydning boshlanishiga '###' belgisini qo'ying. "
+            f"Faqat o'zbek tilida yozing."
         )
         
         response = model.generate_content(prompt)
         text_content = response.text
 
-        # Taqdimot faylini yaratish
-        file_buffer = create_pptx(text_content, message.text)
+        # Faylni yaratish
+        pptx_file = create_pptx(text_content, message.text)
         
-        # Faylni yuborish
+        # Faylni Telegramga yuborish
         document = types.BufferedInputFile(
-            file_buffer.read(), 
+            pptx_file.read(), 
             filename=f"{message.text.replace(' ', '_')}_taqdimot.pptx"
         )
         
-        await message.answer_document(
-            document, 
-            caption=f"✅ '{message.text}' mavzusidagi taqdimot tayyorlandi!\n\n@SizningBotNominiYozing"
-        )
+        await message.answer_document(document, caption=f"✅ '{message.text}' mavzusidagi taqdimot tayyor!")
         await wait_msg.delete()
         
     except Exception as e:
-        logging.error(f"Xato yuz berdi: {e}")
-        await message.answer("Kechirasiz, taqdimot yaratish jarayonida xato yuz berdi. Birozdan so'ng qayta urinib ko'ring.")
+        logging.error(f"Xatolik: {e}")
+        await message.answer("Kechirasiz, taqdimot yaratishda xatolik yuz berdi. 😔")
 
 # 4. ISHGA TUSHIRISH
 async def main():
