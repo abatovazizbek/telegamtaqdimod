@@ -21,22 +21,31 @@ GOOGLE_CX = "3399766467a1d4c32"
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-
-# 2. 404 XATOSIDAN HIMOYALANGAN MODEL TANLASH
 genai.configure(api_key=GEMINI_API_KEY)
 
-def get_working_model():
-    """Modellarni birma-bir tekshiradi (404 xatosini oldini oladi)"""
-    for m_name in ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']:
+# 2. 404 XATOSIDAN HIMOYALANGAN MODELNI CHAQIRISH
+def generate_with_fallback(prompt):
+    """Modellarni birma-bir sinab ko'radi va matn qaytaradi"""
+    # Eng yangi modellardan boshlab eskisiga qarab ro'yxat
+    models_to_try = [
+        'gemini-1.5-flash', 
+        'gemini-1.5-pro', 
+        'gemini-pro',
+        'models/gemini-1.5-flash', # Ba'zi hududlarda models/ prefiksi kerak
+        'models/gemini-pro'
+    ]
+    
+    for model_name in models_to_try:
         try:
-            m = genai.GenerativeModel(m_name)
-            # Model borligini tekshirish uchun kichik so'rov yuboramiz (ixtiyoriy)
-            return m
-        except:
+            logging.info(f"Urinish: {model_name}")
+            m = genai.GenerativeModel(model_name)
+            response = m.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            logging.error(f"{model_name} ishlamadi: {e}")
             continue
     return None
 
-model = get_working_model()
 user_data = {}
 
 # 3. FON VA RASM FUNKSIYALARI
@@ -71,20 +80,23 @@ def create_pptx(raw_text, bg_type):
         set_slide_background(slide, selected_bg)
         
         lines = section.split('\n')
-        title_shape = slide.shapes.title
-        title_shape.text = lines[0].replace("**", "").replace("*", "").strip()
-        title_shape.text_frame.paragraphs[0].font.color.rgb = selected_txt
+        title_text = lines[0].replace("**", "").replace("*", "").strip()
+        slide.shapes.title.text = title_text[:100]
+        
+        # Sarlavha rangi
+        slide.shapes.title.text_frame.paragraphs[0].font.color.rgb = selected_txt
         
         body = slide.placeholders[1]
         body.width = Inches(5.0)
+        tf = body.text_frame
         for line in lines[1:]:
             clean = line.strip().replace("**", "").replace("*", "").replace("- ", "")
             if clean:
-                p = body.text_frame.add_paragraph()
+                p = tf.add_paragraph()
                 p.text = clean
                 p.font.size, p.font.color.rgb = Pt(18), selected_txt
 
-        img_url = get_image(title_shape.text)
+        img_url = get_image(title_text)
         if img_url:
             try:
                 img_data = requests.get(img_url, timeout=5).content
@@ -107,26 +119,36 @@ async def ask_style(message: types.Message):
     user_data[message.from_user.id] = message.text
     
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="🔵 Ko'k", callback_data="bg_blue"),
-                types.InlineKeyboardButton(text="⚫️ Qora", callback_data="bg_dark"),
-                types.InlineKeyboardButton(text="⚪️ Oq", callback_data="bg_white"))
-    await message.answer("Fon rangini tanlang:", reply_markup=builder.as_markup())
+    builder.row(types.InlineKeyboardButton(text="🔵 Ko'k fon", callback_data="bg_blue"),
+                types.InlineKeyboardButton(text="⚫️ Qora fon", callback_data="bg_dark"),
+                types.InlineKeyboardButton(text="⚪️ Oq fon", callback_data="bg_white"))
+    await message.answer("Taqdimot uchun fon rangini tanlang:", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data.startswith("bg_"))
 async def process_style(callback: types.CallbackQuery):
     bg_type = callback.data.split("_")[1]
-    topic = user_data.get(callback.from_user.id, "Taqdimot")
-    await callback.message.edit_text("⏳ Tayyorlanmoqda...")
+    topic = user_data.get(callback.from_user.id)
+    if not topic:
+        await callback.answer("Xatolik: Mavzu topilmadi. Qayta yozing.")
+        return
+
+    await callback.message.edit_text(f"⏳ '{topic}' mavzusida taqdimot tayyorlanmoqda...")
     
     try:
-        # 404 xatosidan himoyalangan model ishlatilyapti
-        response = model.generate_content(f"Mavzu: {topic}. 5 ta slayd, ### bilan ajrat.")
-        file_buffer = create_pptx(response.text, bg_type)
+        # 404 dan himoyalangan funksiya chaqirilyapti
+        prompt = f"Mavzu: {topic}. 5 ta slayd uchun matn yoz, ### bilan ajrat. Faqat o'zbek tilida."
+        text_content = generate_with_fallback(prompt)
+        
+        if not text_content:
+            raise Exception("Hech qanday model javob bermadi (API limit bo'lishi mumkin)")
+
+        file_buffer = create_pptx(text_content, bg_type)
         file = types.BufferedInputFile(file_buffer.read(), filename=f"{topic}.pptx")
-        await callback.message.answer_document(file, caption="✅ Tayyor!")
+        
+        await callback.message.answer_document(file, caption=f"✅ '{topic}' tayyor!")
         await callback.message.delete()
     except Exception as e:
-        await callback.message.answer(f"❌ Xato: {str(e)[:50]}")
+        await callback.message.answer(f"❌ Xatolik: {str(e)[:100]}")
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
