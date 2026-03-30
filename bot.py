@@ -3,21 +3,22 @@ import asyncio
 import logging
 import io
 import re
+import requests
 import google.generativeai as genai
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from pptx import Presentation
-from pptx.util import Pt
+from pptx.util import Pt, Inches
 from pptx.dml.color import RGBColor
 
 # ==========================================
-# 1. TOKEN OCHIQ HOLDA, QOLGANLARI OS ORQALI
+# 1. SOZLAMALAR (IMPORT OS ORQALI)
 # ==========================================
-TOKEN = "8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY" # Telegram token ochiq holda
-GEMINI_KEY = os.getenv("GEMINI_KEY") # Railway Variables'dan olinadi
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") # Railway Variables'dan olinadi
-GOOGLE_CX = os.getenv("GOOGLE_CX") # Railway Variables'dan olinadi
+TOKEN = "8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY" # Ochiq holda qoldi
+GEMINI_KEY = os.getenv("GEMINI_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_CX = os.getenv("GOOGLE_CX")
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
@@ -25,12 +26,14 @@ dp = Dispatcher()
 
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
+else:
+    logging.error("GEMINI_KEY topilmadi! Railway Variables-ni tekshiring.")
 
 # ==========================================
-# 2. MODELNI AVTOMATIK TANLASH (404 FIX)
+# 2. MODELNI AVTOMATIK TANLASH (404 XATOSISIZ)
 # ==========================================
 def get_ai_content(prompt):
-    # Loglardagi 404 xatosini chetlab o'tish uchun
+    # Loglardagi 404 xatosini chetlab o'tish uchun stabil modellar
     model_variants = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
     
     for model_name in model_variants:
@@ -41,12 +44,35 @@ def get_ai_content(prompt):
             if response and response.text:
                 return response.text
         except Exception as e:
-            logging.error(f"{model_name} xatosi: {e}")
+            logging.error(f"{model_name} ishlamadi: {e}")
             continue 
     return None
 
 # ==========================================
-# 3. TAQDIMOT YARATISH LOGIKASI
+# 3. RASM QIDIRISH (GOOGLE SEARCH API)
+# ==========================================
+def get_google_image(query):
+    if not GOOGLE_API_KEY or not GOOGLE_CX:
+        return None
+    try:
+        url = "https://www.googleapis.com/customsearch/v1"
+        params = {
+            'q': query,
+            'cx': GOOGLE_CX,
+            'key': GOOGLE_API_KEY,
+            'searchType': 'image',
+            'num': 1,
+            'imgSize': 'large'
+        }
+        res = requests.get(url, params=params, timeout=5).json()
+        if 'items' in res:
+            return res['items'][0]['link']
+    except Exception as e:
+        logging.error(f"Google Search xatosi: {e}")
+    return None
+
+# ==========================================
+# 4. TAQDIMOT YARATISH LOGIKASI (.pptx)
 # ==========================================
 def create_ppt(text, bg_type):
     prs = Presentation()
@@ -67,7 +93,8 @@ def create_ppt(text, bg_type):
         
         lines = sec.split('\n')
         title = slide.shapes.title
-        title.text = lines[0].replace("*", "").strip()
+        title_text = lines[0].replace("*", "").strip()
+        title.text = title_text
         title.text_frame.paragraphs[0].font.color.rgb = s_tx
         
         body = slide.placeholders[1]
@@ -76,7 +103,15 @@ def create_ppt(text, bg_type):
             if clean:
                 p = body.text_frame.add_paragraph()
                 p.text = clean
-                p.font.size, p.font.color.rgb = Pt(20), s_tx
+                p.font.size, p.font.color.rgb = Pt(18), s_tx
+        
+        # Rasm qo'shish
+        img_url = get_google_image(title_text)
+        if img_url:
+            try:
+                img_data = requests.get(img_url, timeout=5).content
+                slide.shapes.add_picture(io.BytesIO(img_data), Inches(5.2), Inches(1.5), width=Inches(4.5))
+            except: pass
                 
     buf = io.BytesIO()
     prs.save(buf)
@@ -84,7 +119,7 @@ def create_ppt(text, bg_type):
     return buf
 
 # ==========================================
-# 4. BOT HANDLERLARI
+# 5. BOT HANDLERLARI
 # ==========================================
 user_data = {}
 
@@ -100,27 +135,27 @@ async def ask_bg(m: types.Message):
     kb.row(types.InlineKeyboardButton(text="🔵 Ko'k", callback_data="bg_blue"),
            types.InlineKeyboardButton(text="⚫️ Qora", callback_data="bg_dark"),
            types.InlineKeyboardButton(text="⚪️ Oq", callback_data="bg_white"))
-    await m.answer("Taqdimot uchun fon rangini tanlang:", reply_markup=kb.as_markup())
+    await m.answer("Fonni tanlang:", reply_markup=kb.as_markup())
 
 @dp.callback_query(F.data.startswith("bg_"))
 async def process(cb: types.CallbackQuery):
     bg = cb.data.split("_")[1]
     topic = user_data.get(cb.from_user.id)
-    await cb.message.edit_text(f"⏳ '{topic}' mavzusida taqdimot tayyorlanmoqda...")
+    await cb.message.edit_text(f"⏳ '{topic}' tayyorlanmoqda...")
     
     try:
         content = get_ai_content(f"Write 5 slides about {topic} in Uzbek, separate with ###")
-        if not content: raise Exception("Gemini javob bermadi.")
+        if not content: raise Exception("Gemini kalitida xato yoki 404.")
         
         ppt = create_ppt(content, bg)
         f = types.BufferedInputFile(ppt.read(), filename=f"{topic}.pptx")
-        await cb.message.answer_document(f, caption=f"✅ '{topic}' tayyor!")
+        await cb.message.answer_document(f, caption=f"✅ Tayyor!")
         await cb.message.delete()
     except Exception as e:
         await cb.message.answer(f"❌ Xato: {str(e)}")
 
 async def main():
-    # TelegramConflictError xatosini oldini olish
+    # Conflict xatosini yo'qotish
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
