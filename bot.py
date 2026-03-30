@@ -8,28 +8,55 @@ from aiogram.filters import Command
 from pptx import Presentation
 from pptx.util import Pt
 
-# 1. SOZLAMALAR
+# 1. SOZLAMALAR VA LOGGING
 TOKEN = "8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY"
 GEMINI_API_KEY = os.getenv("GEMINI_KEY")
 
 logging.basicConfig(level=logging.INFO)
-
-# Gemini API ni sozlash
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    # Eng barqaror model nomidan foydalanamiz
-    model = genai.GenerativeModel('gemini-1.5-flash')
-else:
-    model = None
-
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# 2. TAQDIMOT YARATISH FUNKSIYASI (SAHIFALARGA BO'LISH BILAN)
+# 2. MODELNI AVTOMATIK ANIQLASH (MOSLASHUVCHAN)
+def get_working_model():
+    if not GEMINI_API_KEY:
+        logging.error("GEMINI_KEY topilmadi!")
+        return None
+    
+    genai.configure(api_key=GEMINI_API_KEY)
+    
+    try:
+        # Google'dan sizning kalitingiz uchun ochiq modellarni olish
+        available_models = [
+            m.name for m in genai.list_models() 
+            if 'generateContent' in m.supported_generation_methods
+        ]
+        
+        logging.info(f"Mavjud modellar: {available_models}")
+
+        # 1-navbatda 'gemini-1.5-flash' ni qidiramiz
+        for m_name in available_models:
+            if 'gemini-1.5-flash' in m_name:
+                logging.info(f"Tanlangan model: {m_name}")
+                return genai.GenerativeModel(m_name)
+        
+        # Agar flash bo'lmasa, pro yoki birinchi uchraganini olamiz
+        if available_models:
+            logging.warning(f"Zaxira modeli tanlandi: {available_models[0]}")
+            return genai.GenerativeModel(available_models[0])
+            
+    except Exception as e:
+        logging.error(f"Modelni aniqlashda xato: {e}")
+        # Eng oxirgi chora sifatida standart nom
+        return genai.GenerativeModel('gemini-1.5-flash-latest')
+
+# Modelni ishga tushirish
+model = get_working_model()
+
+# 3. TAQDIMOT YARATISH FUNKSIYASI
 def create_pptx(text_content, topic):
     prs = Presentation()
     
-    # Matnni '###' belgisi orqali slayd bo'laklariga bo'lamiz
+    # Matnni '###' orqali bo'laklarga bo'lamiz
     slides_data = text_content.split("###")
     
     for content in slides_data:
@@ -37,8 +64,7 @@ def create_pptx(text_content, topic):
         if not content or len(content) < 10:
             continue
             
-        # Slayd qo'shish (Sarlavha va matnli layout)
-        slide_layout = prs.slide_layouts[1]
+        slide_layout = prs.slide_layouts[1] # Sarlavha va matn
         slide = prs.slides.add_slide(slide_layout)
         
         # Sarlavha va matnni ajratish
@@ -48,11 +74,10 @@ def create_pptx(text_content, topic):
         
         # Slaydga yozish
         slide.shapes.title.text = title_text
-        
         body_shape = slide.placeholders[1]
         body_shape.text = body_text
         
-        # Shrift o'lchamini biroz kattalashtiramiz
+        # Shriftni sozlash
         for paragraph in body_shape.text_frame.paragraphs:
             paragraph.font.size = Pt(18)
             
@@ -61,40 +86,40 @@ def create_pptx(text_content, topic):
     buffer.seek(0)
     return buffer
 
-# 3. BOT KOMANDALARI
+# 4. BOT HANDLERLARI
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
     await message.answer(
         f"Assalomu alaykum, {message.from_user.first_name}!\n\n"
-        "Menga mavzu yuboring, men sizga o'zbek tilida, sahifalangan taqdimot tayyorlab beraman. 📊"
+        "Men avtomatik moslashuvchan AI botman. Istalgan mavzuni yozing, "
+        "men sahifalarga bo'lingan o'zbekcha taqdimot tayyorlab beraman."
     )
 
 @dp.message(F.text)
 async def handle_ppt_request(message: types.Message):
     if not model:
-        await message.answer("Xato: GEMINI_KEY o'rnatilmagan yoki noto'g'ri. ❌")
+        await message.answer("Xato: AI modeli bilan bog'lanish imkonsiz. ❌")
         return
 
-    wait_msg = await message.answer(f"🔍 '{message.text}' mavzusida taqdimot tayyorlanmoqda... ⏳")
+    wait_msg = await message.answer(f"🔍 '{message.text}' mavzusi tahlil qilinmoqda... ⏳")
     
     try:
-        # Gemini uchun o'zbekcha buyruq
         prompt = (
             f"Mavzu: {message.text}. Ushbu mavzuda 5-6 ta slayddan iborat o'zbekcha taqdimot rejasi tuzing. "
-            f"Juda muhim: Har bir slaydning boshlanishiga '###' belgisini qo'ying. "
-            f"Faqat o'zbek tilida yozing."
+            f"Har bir yangi slaydni '###' belgisi bilan boshlang. Faqat o'zbek tilida yozing."
         )
         
+        # AI matn yaratadi
         response = model.generate_content(prompt)
         text_content = response.text
 
         # Faylni yaratish
         pptx_file = create_pptx(text_content, message.text)
         
-        # Faylni Telegramga yuborish
+        # Faylni yuborish
         document = types.BufferedInputFile(
             pptx_file.read(), 
-            filename=f"{message.text.replace(' ', '_')}_taqdimot.pptx"
+            filename=f"{message.text.replace(' ', '_')}.pptx"
         )
         
         await message.answer_document(document, caption=f"✅ '{message.text}' mavzusidagi taqdimot tayyor!")
@@ -102,11 +127,11 @@ async def handle_ppt_request(message: types.Message):
         
     except Exception as e:
         logging.error(f"Xatolik: {e}")
-        await message.answer("Kechirasiz, taqdimot yaratishda xatolik yuz berdi. 😔")
+        await message.answer("Kechirasiz, taqdimot yaratishda kutilmagan xato yuz berdi. 😔")
 
-# 4. ISHGA TUSHIRISH
+# 5. ISHGA TUSHIRISH
 async def main():
-    logging.info("Bot ishga tushdi...")
+    logging.info("Bot polling rejimida ishga tushdi...")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
