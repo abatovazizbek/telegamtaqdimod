@@ -11,7 +11,7 @@ from pptx import Presentation
 from pptx.util import Pt, Inches
 from pptx.dml.color import RGBColor
 
-# 1. SOZLAMALAR (Railway Variables'dan o'qiydi)
+# 1. SOZLAMALAR (Railway Variables'dan avtomatik o'qiydi)
 TOKEN = "8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY"
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 
@@ -19,17 +19,17 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Gemini sozlamasi - 400 API Key xatosini oldini olish uchun
+# Gemini-ni sozlash - 400 API Key xatosini oldini oladi
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
     logging.info("✅ GEMINI_KEY Railway'dan muvaffaqiyatli o'qildi.")
 else:
-    logging.error("❌ XATO: GEMINI_KEY o'zgaruvchisi topilmadi!")
+    logging.error("❌ XATO: GEMINI_KEY topilmadi! Railway Variables-ni tekshiring.")
 
-# 2. MODELNI CHAQIRISH (404 xatosini tuzatish)
+# 2. GEMINI BILAN BOG'LANISH (404 xatosini tuzatish)
 def get_ai_content(topic):
     try:
-        # 'models/' prefiksini ishlatmaymiz, bu 404 xatosini yo'qotadi
+        # Model nomidan 'models/' prefiksini olib tashladik
         model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"Write 5 slides about {topic} in Uzbek. Use ### to separate slides."
         response = model.generate_content(prompt)
@@ -38,7 +38,7 @@ def get_ai_content(topic):
         logging.error(f"AI Xatosi: {str(e)}")
         return None
 
-# 3. TAQDIMOT (.pptx) YARATISH
+# 3. TAQDIMOT YARATISH (.pptx)
 def create_ppt(text, bg_type):
     prs = Presentation()
     sections = re.split(r'###', text)
@@ -72,7 +72,7 @@ def create_ppt(text, bg_type):
     buf.seek(0)
     return buf
 
-# 4. HANDLERLAR
+# 4. BOT HANDLERLARI
 user_data = {}
 
 @dp.message(Command("start"))
@@ -102,10 +102,10 @@ async def process(cb: types.CallbackQuery):
         await cb.message.answer_document(f, caption=f"✅ '{topic}' tayyor!")
         await msg.delete()
     else:
-        await cb.message.answer(f"❌ Xato: Gemini javob bermadi. API kalitni tekshiring.")
+        await cb.message.answer("❌ Xato: Gemini javob bermadi. API kalitni tekshiring.")
 
 async def main():
-    # TelegramConflictError ni oldini olish
+    # Conflict xatosini oldini olish uchun webhook-ni tozalash
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
