@@ -6,9 +6,10 @@ import google.generativeai as genai
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from pptx import Presentation
-from pptx.util import Pt
+from pptx.util import Inches, Pt
+from pptx.dml.color import RGBColor
 
-# 1. SOZLAMALAR VA LOGGING
+# 1. SOZLAMALAR
 TOKEN = "8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY"
 GEMINI_API_KEY = os.getenv("GEMINI_KEY")
 
@@ -16,47 +17,30 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# 2. MODELNI AVTOMATIK ANIQLASH (MOSLASHUVCHAN)
+# 2. MODELNI AVTOMATIK ANIQLASH (404 XATOSINI OLDINI OLISH)
 def get_working_model():
     if not GEMINI_API_KEY:
         logging.error("GEMINI_KEY topilmadi!")
         return None
-    
     genai.configure(api_key=GEMINI_API_KEY)
-    
     try:
-        # Google'dan sizning kalitingiz uchun ochiq modellarni olish
-        available_models = [
-            m.name for m in genai.list_models() 
-            if 'generateContent' in m.supported_generation_methods
-        ]
-        
-        logging.info(f"Mavjud modellar: {available_models}")
-
-        # 1-navbatda 'gemini-1.5-flash' ni qidiramiz
+        # Mavjud modellarni tekshirish
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         for m_name in available_models:
             if 'gemini-1.5-flash' in m_name:
-                logging.info(f"Tanlangan model: {m_name}")
                 return genai.GenerativeModel(m_name)
-        
-        # Agar flash bo'lmasa, pro yoki birinchi uchraganini olamiz
-        if available_models:
-            logging.warning(f"Zaxira modeli tanlandi: {available_models[0]}")
-            return genai.GenerativeModel(available_models[0])
-            
+        return genai.GenerativeModel(available_models[0]) if available_models else None
     except Exception as e:
-        logging.error(f"Modelni aniqlashda xato: {e}")
-        # Eng oxirgi chora sifatida standart nom
-        return genai.GenerativeModel('gemini-1.5-flash-latest')
+        logging.error(f"Model aniqlashda xato: {e}")
+        return genai.GenerativeModel('gemini-1.5-flash')
 
-# Modelni ishga tushirish
 model = get_working_model()
 
-# 3. TAQDIMOT YARATISH FUNKSIYASI
-def create_pptx(text_content, topic):
+# 3. TAQDIMOT YARATISH (YULDUZCHALARSIZ VA 20 TAgacha SLAYD)
+def create_pptx(text_content):
     prs = Presentation()
     
-    # Matnni '###' orqali bo'laklarga bo'lamiz
+    # Matnni '###' orqali slaydlararo bo'lamiz
     slides_data = text_content.split("###")
     
     for content in slides_data:
@@ -69,17 +53,38 @@ def create_pptx(text_content, topic):
         
         # Sarlavha va matnni ajratish
         lines = content.split('\n')
-        title_text = lines[0].replace("Slayd:", "").replace("Slayd", "").strip()
-        body_text = "\n".join(lines[1:]).strip()
+        # Sarlavhadan yulduzchalarni tozalash
+        raw_title = lines[0].replace("Slayd:", "").replace("Slayd", "").replace("**", "").replace("*", "").strip()
         
-        # Slaydga yozish
-        slide.shapes.title.text = title_text
+        title = slide.shapes.title
+        title.text = raw_title
+        title.text_frame.paragraphs[0].font.color.rgb = RGBColor(0, 51, 102) # To'q ko'k
+
         body_shape = slide.placeholders[1]
-        body_shape.text = body_text
+        tf = body_shape.text_frame
+        tf.word_wrap = True
         
-        # Shriftni sozlash
-        for paragraph in body_shape.text_frame.paragraphs:
-            paragraph.font.size = Pt(18)
+        first_line = True
+        for line in lines[1:]:
+            clean_line = line.strip()
+            if not clean_line or clean_line == "---":
+                continue
+            
+            # MATNNI TOZALASH (Yulduzcha va chiziqchalarni olib tashlash)
+            clean_line = clean_line.replace("**", "")
+            if clean_line.startswith("* "): clean_line = clean_line[2:]
+            elif clean_line.startswith("*"): clean_line = clean_line[1:]
+            if clean_line.startswith("- "): clean_line = clean_line[2:]
+            
+            if first_line:
+                p = tf.paragraphs[0]
+                first_line = False
+            else:
+                p = tf.add_paragraph()
+            
+            p.text = clean_line
+            p.font.size = Pt(18)
+            p.font.color.rgb = RGBColor(0, 0, 0) # Qora rang
             
     buffer = io.BytesIO()
     prs.save(buffer)
@@ -89,49 +94,37 @@ def create_pptx(text_content, topic):
 # 4. BOT HANDLERLARI
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
-    await message.answer(
-        f"Assalomu alaykum, {message.from_user.first_name}!\n\n"
-        "Men avtomatik moslashuvchan AI botman. Istalgan mavzuni yozing, "
-        "men sahifalarga bo'lingan o'zbekcha taqdimot tayyorlab beraman."
-    )
+    await message.answer("Assalomu alaykum! Mavzu yuboring, men sizga 20 tagacha slayddan iborat mukammal va toza taqdimot tayyorlayman. ✨")
 
 @dp.message(F.text)
 async def handle_ppt_request(message: types.Message):
     if not model:
-        await message.answer("Xato: AI modeli bilan bog'lanish imkonsiz. ❌")
+        await message.answer("Xato: AI modeli ulanmagan. ❌")
         return
 
-    wait_msg = await message.answer(f"🔍 '{message.text}' mavzusi tahlil qilinmoqda... ⏳")
+    wait_msg = await message.answer(f"🔍 '{message.text}' bo'yicha katta hajmdagi taqdimot tayyorlanmoqda (20 tagacha slayd). Iltimos, kuting... ⏳")
     
     try:
+        # 20 ta slayd so'rash uchun PROMPT
         prompt = (
-            f"Mavzu: {message.text}. Ushbu mavzuda 5-6 ta slayddan iborat o'zbekcha taqdimot rejasi tuzing. "
-            f"Har bir yangi slaydni '###' belgisi bilan boshlang. Faqat o'zbek tilida yozing."
+            f"Mavzu: {message.text}. Ushbu mavzuda kamida 15 ta, ko'pi bilan 20 ta slayddan iborat mukammal o'zbekcha taqdimot rejasi tuzing. "
+            f"Har bir slaydni '###' belgisi bilan boshlang. Har bir slayd mazmuni boy va tushunarli bo'lsin. "
+            f"Faqat o'zbek tilida yozing. Matn ichida ** yoki * belgilarini ishlatmang."
         )
         
-        # AI matn yaratadi
         response = model.generate_content(prompt)
-        text_content = response.text
-
-        # Faylni yaratish
-        pptx_file = create_pptx(text_content, message.text)
+        pptx_file = create_pptx(response.text)
         
-        # Faylni yuborish
-        document = types.BufferedInputFile(
-            pptx_file.read(), 
-            filename=f"{message.text.replace(' ', '_')}.pptx"
-        )
-        
-        await message.answer_document(document, caption=f"✅ '{message.text}' mavzusidagi taqdimot tayyor!")
+        document = types.BufferedInputFile(pptx_file.read(), filename=f"{message.text}.pptx")
+        await message.answer_document(document, caption=f"✅ '{message.text}' mavzusida maxsus taqdimot tayyor!")
         await wait_msg.delete()
         
     except Exception as e:
         logging.error(f"Xatolik: {e}")
-        await message.answer("Kechirasiz, taqdimot yaratishda kutilmagan xato yuz berdi. 😔")
+        await message.answer("Kechirasiz, juda katta hajmdagi ma'lumotni qayta ishlashda xatolik bo'ldi. Qayta urinib ko'ring.")
 
-# 5. ISHGA TUSHIRISH
 async def main():
-    logging.info("Bot polling rejimida ishga tushdi...")
+    # Eski xabarlarni tozalash (Conflict xatosini oldini oladi)
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
