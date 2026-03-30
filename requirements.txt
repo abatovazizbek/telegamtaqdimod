@@ -1,4 +1,4 @@
-aiogram
-python-pptx
-requests
-google-genai
+aiogram==3.4.1
+google-generativeai==0.4.1
+python-pptx==0.6.21
+requests==2.31.0
