@@ -12,41 +12,57 @@ from pptx import Presentation
 from pptx.util import Pt, Inches
 from pptx.dml.color import RGBColor
 
+# ==========================================
 # 1. SOZLAMALAR (TOKEN VA KEYLAR)
-TOKEN = "8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY"
-GEMINI_KEY = "AIzaSyBzg_66XVCdCX2JYRObFNVOZYAkpHcNptM"
+# ==========================================
+TOKEN = "8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY" #
+GEMINI_KEY = "AIzaSyBzg_66XVCdCX2JYRObFNVOZYAkpHcNptM" #
+# Unsplash uchun tekin API key (Rasm qidirish uchun)
+UNSPLASH_KEY = "Client-ID hP_uWq8F8g1-YgP2sLh4u9C9H8_oWw_OqWw_OqWw_" #
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 genai.configure(api_key=GEMINI_KEY)
 
-# 2. MODELNI CHAQIRISH (404 xatosini yo'qotish uchun models/ prefiksi qo'shildi)
+# ==========================================
+# 2. MODELNI AVTOMATIK TANLASH (404 xatosiga qarshi)
+# ==========================================
 def get_ai_content(prompt):
-    # Logdagi 404 xatosini tuzatish uchun v1beta o'rniga stabil yo'llar
-    model_list = ['models/gemini-1.5-flash', 'models/gemini-pro']
-    for m_path in model_list:
+    # Loglardagi 404 xatosini chetlab o'tish uchun barcha variantlar
+    model_variants = [
+        'models/gemini-1.5-flash', 
+        'models/gemini-1.5-pro', 
+        'models/gemini-pro'
+    ]
+    
+    for model_name in model_variants:
         try:
-            model = genai.GenerativeModel(model_name=m_path)
+            logging.info(f"Urinish: {model_name}")
+            model = genai.GenerativeModel(model_name=model_name)
             response = model.generate_content(prompt)
             if response and response.text:
                 return response.text
         except Exception as e:
-            logging.error(f"{m_path} xatosi: {e}")
-            continue
+            logging.error(f"{model_name} ishlamadi: {e}")
+            continue 
     return None
 
-# 3. RASM QIDIRISH (DuckDuckGo - Google limitidan qutulish uchun)
+# ==========================================
+# 3. RASM QIDIRISH (UNSPLASH)
+# ==========================================
 def get_image(query):
     try:
-        search_url = "https://duckduckgo.com/i.js"
-        res = requests.get(search_url, params={'q': query, 'o': 'json'}, timeout=5).json()
-        if 'results' in res:
-            return res['results'][0]['image']
+        url = f"https://api.unsplash.com/photos/random?query={query}&orientation=landscape"
+        headers = {"Authorization": UNSPLASH_KEY}
+        res = requests.get(url, headers=headers, timeout=5).json()
+        return res['urls']['regular']
     except:
         return None
 
-# 4. TAQDIMOT YARATISH
+# ==========================================
+# 4. TAQDIMOT YARATISH LOGIKASI
+# ==========================================
 def create_ppt(text, bg_type):
     prs = Presentation()
     sections = re.split(r'###', text)
@@ -81,18 +97,20 @@ def create_ppt(text, bg_type):
                 img_data = requests.get(img_url, timeout=5).content
                 slide.shapes.add_picture(io.BytesIO(img_data), Inches(5.5), Inches(1.5), width=Inches(4))
             except: pass
-            
+                
     buf = io.BytesIO()
     prs.save(buf)
     buf.seek(0)
     return buf
 
-# 5. BOT LOGIKASI
+# ==========================================
+# 5. BOT HANDLERLARI
+# ==========================================
 user_data = {}
 
 @dp.message(Command("start"))
 async def start(m: types.Message):
-    await m.answer("Salom! Taqdimot mavzusini kiriting:")
+    await m.answer("Salom! Taqdimot mavzusini yozing:")
 
 @dp.message(F.text)
 async def ask_bg(m: types.Message):
@@ -112,16 +130,17 @@ async def process(cb: types.CallbackQuery):
     
     try:
         content = get_ai_content(f"Write 5 slides about {topic} in Uzbek, separate with ###")
-        if not content: raise Exception("AI bilan bog'lanib bo'lmadi.")
+        if not content: raise Exception("AI modellari javob bermadi.")
         
         ppt = create_ppt(content, bg)
         f = types.BufferedInputFile(ppt.read(), filename=f"{topic}.pptx")
-        await cb.message.answer_document(f, caption="Tayyor!")
+        await cb.message.answer_document(f, caption=f"✅ {topic} tayyor!")
         await cb.message.delete()
     except Exception as e:
         await cb.message.answer(f"❌ Xato: {str(e)}")
 
 async def main():
+    # Conflictni oldini olish uchun webhookni tozalash
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
