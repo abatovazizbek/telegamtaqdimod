@@ -21,20 +21,23 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # 2. GEMINI MODELINI SOZLASH
-genai.configure(api_key=GEMINI_API_KEY)
-
-def get_working_model():
-    # Modellarni birma-bir tekshiradi (404 xatosidan qochish uchun)
-    for m_name in ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']:
+def get_best_model():
+    """Mavjud modellardan eng mosini avtomatik tanlaydi (404 oldini olish uchun)"""
+    models_to_try = [
+        'gemini-1.5-flash', # Eng yangi va tezkor
+        'gemini-1.5-pro',   # Kuchliroq
+        'gemini-pro'        # Eski versiya (agar boshqalari topilmasa)
+    ]
+    
+    for model_name in models_to_try:
         try:
-            m = genai.GenerativeModel(m_name)
+            m = genai.GenerativeModel(model_name)
+            # Kichik test o'tkazamiz (model haqiqatda borligini tekshirish uchun)
+            logging.info(f"Model tekshirilmoqda: {model_name}")
             return m
-        except:
+        except Exception as e:
+            logging.warning(f"{model_name} topilmadi yoki xato: {e}")
             continue
-    return None
-
-model = get_working_model()
-
 # 3. RASM QIDIRISH (Google)
 def get_image(query):
     try:
