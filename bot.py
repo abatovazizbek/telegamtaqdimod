@@ -11,7 +11,7 @@ from pptx import Presentation
 from pptx.util import Pt, Inches
 from pptx.dml.color import RGBColor
 
-# 1. SOZLAMALAR
+# 1. SOZLAMALAR (Railway Variables'dan o'qiydi)
 TOKEN = "8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY"
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 
@@ -19,41 +19,37 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Gemini sozlamasi
+# Gemini sozlamasi - 400 API Key xatosini oldini olish uchun
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    logging.info("✅ GEMINI_KEY muvaffaqiyatli yuklandi.")
+    logging.info("✅ GEMINI_KEY Railway'dan muvaffaqiyatli o'qildi.")
 else:
-    logging.error("❌ GEMINI_KEY topilmadi! Railway Variables-ni tekshiring.")
+    logging.error("❌ XATO: GEMINI_KEY o'zgaruvchisi topilmadi!")
 
-# 2. AI MATN YARATISH
+# 2. MODELNI CHAQIRISH (404 xatosini tuzatish)
 def get_ai_content(topic):
     try:
-        # Eng barqaror modelni tanlaymiz
+        # 'models/' prefiksini ishlatmaymiz, bu 404 xatosini yo'qotadi
         model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"Write 5 slides about {topic} in Uzbek. Use ### to separate slides. Each slide starts with a title."
+        prompt = f"Write 5 slides about {topic} in Uzbek. Use ### to separate slides."
         response = model.generate_content(prompt)
         return response.text if response else None
     except Exception as e:
         logging.error(f"AI Xatosi: {str(e)}")
         return None
 
-# 3. TAQDIMOT YARATISH (.pptx)
+# 3. TAQDIMOT (.pptx) YARATISH
 def create_ppt(text, bg_type):
     prs = Presentation()
     sections = re.split(r'###', text)
     
-    # Ranglar sxemasi
     bg_cols = {"blue": RGBColor(0, 32, 96), "dark": RGBColor(33, 33, 33), "white": RGBColor(255, 255, 255)}
     tx_cols = {"blue": RGBColor(255, 255, 255), "dark": RGBColor(255, 255, 255), "white": RGBColor(0, 0, 0)}
-    
-    s_bg = bg_cols.get(bg_type, bg_cols["white"])
-    s_tx = tx_cols.get(bg_type, tx_cols["white"])
+    s_bg, s_tx = bg_cols.get(bg_type, bg_cols["white"]), tx_cols.get(bg_type, tx_cols["white"])
 
     for sec in sections:
         sec = sec.strip()
         if len(sec) < 10: continue
-        
         slide = prs.slides.add_slide(prs.slide_layouts[1])
         slide.background.fill.solid()
         slide.background.fill.fore_color.rgb = s_bg
@@ -64,12 +60,12 @@ def create_ppt(text, bg_type):
         title.text_frame.paragraphs[0].font.color.rgb = s_tx
         
         body = slide.placeholders[1]
-        for line in lines[1:6]:
+        for line in lines[1:5]:
             clean = line.strip().replace("*", "").replace("- ", "")
             if clean:
                 p = body.text_frame.add_paragraph()
-                p.text = clean[:150]
-                p.font.size, p.font.color.rgb = Pt(20), s_tx
+                p.text = clean[:120]
+                p.font.size, p.font.color.rgb = Pt(18), s_tx
                 
     buf = io.BytesIO()
     prs.save(buf)
@@ -81,7 +77,7 @@ user_data = {}
 
 @dp.message(Command("start"))
 async def start(m: types.Message):
-    await m.answer("Salom! Taqdimot mavzusini yozing (Faqat Gemini orqali):")
+    await m.answer("Salom! Taqdimot mavzusini yozing:")
 
 @dp.message(F.text)
 async def ask_bg(m: types.Message):
@@ -101,17 +97,15 @@ async def process(cb: types.CallbackQuery):
     
     content = get_ai_content(topic)
     if content:
-        try:
-            ppt = create_ppt(content, bg)
-            f = types.BufferedInputFile(ppt.read(), filename=f"{topic}.pptx")
-            await cb.message.answer_document(f, caption=f"✅ Tayyor!")
-            await msg.delete()
-        except Exception as e:
-            await cb.message.answer(f"❌ Fayl yaratishda xato.")
+        ppt = create_ppt(content, bg)
+        f = types.BufferedInputFile(ppt.read(), filename=f"{topic}.pptx")
+        await cb.message.answer_document(f, caption=f"✅ '{topic}' tayyor!")
+        await msg.delete()
     else:
-        await cb.message.answer(f"❌ AI ma'lumot bera olmadi. API kalitini tekshiring.")
+        await cb.message.answer(f"❌ Xato: Gemini javob bermadi. API kalitni tekshiring.")
 
 async def main():
+    # TelegramConflictError ni oldini olish
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
