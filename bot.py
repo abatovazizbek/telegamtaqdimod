@@ -22,18 +22,19 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+# Kalitni sozlash
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
+else:
+    logging.error("XATO: GEMINI_KEY topilmadi!")
 
-# 2. MODELNI TO'G'RI CHAQIRISH (404 XATOSI UCHUN YECHIM)
+# 2. MODELNI CHAQIRISH (404 va v1beta xatosini tuzatish)
 def get_ai_content(prompt):
-    # Model nomini v1beta bilan ishlashi uchun to'g'ri formatlash
+    # 'models/' prefiksi ba'zi versiyalarda xato beradi, shuning uchun shunchaki nomini yozamiz
     model_variants = ['gemini-1.5-flash', 'gemini-1.5-pro']
     for model_name in model_variants:
         try:
-            # Modelni chaqirishda versiyani aniq ko'rsatish shart emas, 
-            # kutubxona o'zi eng stabilini tanlashi uchun model_name kifoya
-            model = genai.GenerativeModel(model_name=model_name)
+            model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt)
             if response and response.text:
                 return response.text
@@ -42,6 +43,7 @@ def get_ai_content(prompt):
             continue 
     return None
 
+# Rasm qidirish (Google Search)
 def get_image(query):
     if not GOOGLE_API_KEY or not GOOGLE_CX:
         return None
@@ -53,6 +55,7 @@ def get_image(query):
     except:
         return None
 
+# Taqdimot yaratish
 def create_ppt(text, bg_type):
     prs = Presentation()
     sections = re.split(r'###', text)
@@ -78,6 +81,7 @@ def create_ppt(text, bg_type):
                 p = body.text_frame.add_paragraph()
                 p.text = clean[:120]
                 p.font.size, p.font.color.rgb = Pt(18), s_tx
+        
         img_url = get_image(title_text)
         if img_url:
             try:
@@ -112,16 +116,15 @@ async def process(cb: types.CallbackQuery):
     msg = await cb.message.edit_text(f"⏳ '{topic}' tayyorlanmoqda...")
     try:
         content = get_ai_content(f"Write 5 slides about {topic} in Uzbek, separate with ###")
-        if not content: raise Exception("AI javob bermadi.")
+        if not content: raise Exception("AI ma'lumot bera olmadi. API kalitni tekshiring.")
         ppt = create_ppt(content, bg)
         f = types.BufferedInputFile(ppt.read(), filename=f"{topic}.pptx")
-        await cb.message.answer_document(f, caption=f"✅ '{topic}' tayyor!")
+        await cb.message.answer_document(f, caption=f"✅ Tayyor!")
         await msg.delete()
     except Exception as e:
         await cb.message.answer(f"❌ Xato: {str(e)}")
 
 async def main():
-    # Railway'da conflict bo'lmasligi uchun webhookni har doim o'chirib start qilish
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
