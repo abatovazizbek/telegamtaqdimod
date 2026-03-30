@@ -7,7 +7,7 @@ import io
 
 # 1. MA'LUMOTLAR
 TOKEN = "8128500951:AAFsgE6uq8eX2kY8_yxFnCLajzrEE3p7EtY"
-GEMINI_API_KEY = "GEMINI_KEY" # Kalitni shu yerga qo'ying
+GEMINI_API_KEY = os.getenv("GEMINI_KEY") # Kalitni shu yerga qo'ying
 
 genai.configure(api_key=GEMINI_API_KEY)
 
