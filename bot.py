@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 
 # Gemini AI sozlash
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+model = genai.GenerativeModel('gemini-1.0-pro')
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
